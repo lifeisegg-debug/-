@@ -330,8 +330,9 @@
 </div>
 
 <script>
-const API_URL = "https://api.anthropic.com/v1/messages";
-const MODEL   = "claude-sonnet-4-20250514";
+const GEMINI_API_KEY = "AIzaSyAQ.Ab8RN6ItuTtZVo9ICzyTny68bMW45S3KXwuyb9GONo9BnbDKSA";
+const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
+const GEMINI_VISION_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 const WHISPER_URL = "https://api.openai.com/v1/audio/transcriptions";
 // ※ OpenAI Whisper API 키를 아래에 입력하세요
 const OPENAI_KEY = "";
@@ -553,23 +554,73 @@ async function runOCROnAll(){
       el.textContent=`🔍 ${i+1}/${state.uploadedFiles.length}장 처리 중...`;
       const file=state.uploadedFiles[i];
       const base64=await fileToBase64(file);
-      const res=await fetch(API_URL,{
+
+      const ocrPrompt = `이 이미지는 카카오톡이나 문자 대화 캡쳐입니다. 모든 대화 텍스트를 정확히 추출해주세요.
+규칙:
+1. "이름: 메시지" 형식으로 출력
+2. 시간 정보는 오후 6:03 형식 그대로 유지 (연락 빈도 분석에 사용)
+3. 이모지 유지
+4. 대화 없으면 "대화 없음"만 출력
+5. 설명 없이 대화만 출력`;
+
+      const res=await fetch(GEMINI_VISION_URL+'?key='+GEMINI_API_KEY,{
         method:'POST',
-        headers:{
-          'Content-Type':'application/json',
-          'anthropic-version':'2023-06-01',
-          'anthropic-dangerous-direct-browser-access':'true'
-        },
+        headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
-          model:MODEL,max_tokens:1500,
-          messages:[{role:'user',content:[
-            {type:'image',source:{type:'base64',media_type:file.type||'image/jpeg',data:base64}},
-            {type:'text',text:`이 이미지는 카카오톡이나 문자 대화 캡쳐입니다. 모든 대화 텍스트를 정확히 추출해주세요.\n규칙:\n1. "이름: 메시지" 형식으로 출력\n2. 시간 정보는 "[HH:MM]" 형식으로 메시지 앞에 보존해주세요 (연락 빈도 분석에 사용)\n3. 이모지 유지\n4. 대화 없으면 "대화 없음"만 출력\n5. 설명 없이 대화만 출력`}
-          ]}]
+          contents:[{
+            parts:[
+              {inline_data:{mime_type:file.type||'image/jpeg',data:base64}},
+              {text:ocrPrompt}
+            ]
+          }]
         })
       });
+      if(!res.ok){
+        const errText=await res.text();
+        console.error('OCR 오류:',res.status,errText);
+        throw new Error('OCR 실패 '+res.status);
+      }
       const data=await res.json();
-      state.extractedTexts.push(data.content?.[0]?.text||'');
+      const extracted=data.candidates?.[0]?.content?.parts?.[0]?.text||'';
+      console.log('이미지'+(i+1)+'추출:', extracted);
+      state.extractedTexts.push(extracted);
+    }
+    const combined=state.extractedTexts.filter(t=>t&&t!=='대화 없음').join('\n\n');
+    document.getElementById('extractedSection').classList.remove('hidden');
+    document.getElementById('extractedText').value=combined;
+    document.getElementById('extractedCount').textContent=combined.length+'자';
+    el.className='ocr-status success';
+    el.textContent=`✅ ${state.uploadedFiles.length}장 추출 완료! 아래에서 확인하고 수정할 수 있어요 💕`;
+    document.getElementById('extractedText').oninput=()=>{
+      document.getElementById('extractedCount').textContent=document.getElementById('extractedText').value.length+'자';
+    };
+  } catch(e){
+    el.className='ocr-status error';
+    el.textContent='❌ 추출 실패. 이미지를 다시 확인해주세요.';
+    console.error(e);
+  }
+}
+
+async function fileToBase64(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(r.result.split(',')[1]);
+    r.onerror=rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function runOCROnAll(){
+  const el=document.getElementById('ocrStatus');
+  el.className='ocr-status loading';
+  el.textContent=`🔍 이미지 ${state.uploadedFiles.length}장에서 텍스트 추출 중...`;
+  try {
+    state.extractedTexts=[];
+    for(let i=0;i<state.uploadedFiles.length;i++){
+      el.textContent=`🔍 ${i+1}/${state.uploadedFiles.length}장 처리 중...`;
+      const file=state.uploadedFiles[i];
+      const base64=await fileToBase64(file);
+
     }
     const combined=state.extractedTexts.filter(t=>t&&t!=='대화 없음').join('\n\n');
     document.getElementById('extractedSection').classList.remove('hidden');
@@ -1064,17 +1115,21 @@ ${chat}
 {"score":${combinedScore},"label":"관심 있어요! 💕","sub":"긍정적인 신호가 많아요","pattern":"대화 패턴 3-4문장 분석","mbti":"이 MBTI 성향 대비 얼마나 특별한 행동인지 포함한 2-3문장","strategy":"앞으로의 행동 조언 2-3문장","interests":["관심사1","관심사2","관심사3"]}`;
 
   try {
-    const res=await fetch(API_URL,{
+    const res=await fetch(GEMINI_URL+'?key='+GEMINI_API_KEY,{
       method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body:JSON.stringify({model:MODEL,max_tokens:1200,messages:[{role:'user',content:prompt}]})
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        contents:[{parts:[{text:prompt}]}],
+        generationConfig:{maxOutputTokens:1200,temperature:0.7}
+      })
     });
+    if(!res.ok){
+      const errText=await res.text();
+      console.error('분석 오류:',res.status,errText);
+      throw new Error('분석 실패 '+res.status);
+    }
     const data=await res.json();
-    const text=data.content[0].text.trim();
+    const text=(data.candidates?.[0]?.content?.parts?.[0]?.text||'').trim();
     let result;
     try{ const m=text.match(/\{[\s\S]*\}/); result=JSON.parse(m?m[0]:text); }
     catch{ result={score:combinedScore,label:'분석 완료',sub:'결과 확인',pattern:text,mbti:'',strategy:'',interests:[]}; }
@@ -1140,9 +1195,13 @@ va.addEventListener('drop',e=>{e.preventDefault();va.style.background='';handleV
 
 // 로컬 파일 실행 감지 → CORS 경고 배너 표시
 (function detectLocal() {
+  const banner = document.getElementById('corsBanner');
+  if (!banner) return;
   if (window.location.protocol === 'file:') {
-    const banner = document.getElementById('corsBanner');
-    if (banner) banner.style.display = 'block';
+    banner.style.display = 'block';
+  } else {
+    // https 환경 (GitHub Pages, Netlify 등) — 배너 숨김
+    banner.style.display = 'none';
   }
 })();
 </script>
